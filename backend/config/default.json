@@ -1,0 +1,11 @@
+{
+  "port": 3001,
+  "jwtSecret": "your-jwt-secret",
+  "db": {
+    "host": "localhost",
+    "port": 5432,
+    "user": "greenova8_user",
+    "password": "your-secure-password",
+    "database": "greenova8_mvp"
+  }
+}

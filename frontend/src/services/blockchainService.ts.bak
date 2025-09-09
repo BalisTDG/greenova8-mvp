@@ -1,0 +1,190 @@
+import {
+    Connection,
+    PublicKey,
+    Transaction,
+    SystemProgram,
+    LAMPORTS_PER_SOL,
+    sendAndConfirmTransaction,
+    Keypair,
+} from '@solana/web3.js';
+import {
+    createTransferInstruction,
+    getOrCreateAssociatedTokenAccount,
+    TOKEN_PROGRAM_ID,
+    ASSOCIATED_TOKEN_PROGRAM_ID,
+} from '@solana/spl-token';
+
+export interface PaymentResult {
+    success: boolean;
+    signature?: string;
+    error?: string;
+    amount?: number;
+}
+
+export interface ProjectPayment {
+    projectId: number;
+    amount: number; // Amount in USD
+    solAmount: number; // Converted to SOL
+    recipientAddress: string;
+}
+
+class BlockchainPaymentService {
+    private connection: Connection;
+    private readonly DEVNET_RPC = 'https://api.devnet.solana.com';
+    private readonly PROJECT_WALLET = new PublicKey('EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v'); // Demo project wallet
+
+    constructor() {
+        this.connection = new Connection(this.DEVNET_RPC, 'confirmed');
+    }
+
+    /**
+     * Get current SOL price in USD (simplified for demo)
+     */
+    async getSolPrice(): Promise<number> {
+        try {
+            const response = await fetch('https://api.coingecko.com/api/v3/simple/price?ids=solana&vs_currencies=usd');
+            const data = await response.json();
+            return data.solana.usd;
+        } catch (error) {
+            console.warn('Failed to fetch SOL price, using fallback');
+            return 100; // Fallback price
+        }
+    }
+
+    /**
+     * Convert USD amount to SOL
+     */
+    async convertUsdToSol(usdAmount: number): Promise<number> {
+        const solPrice = await this.getSolPrice();
+        return usdAmount / solPrice;
+    }
+
+    /**
+     * Get wallet balance
+     */
+    async getWalletBalance(publicKey: PublicKey): Promise<number> {
+        try {
+            const balance = await this.connection.getBalance(publicKey);
+            return balance / LAMPORTS_PER_SOL;
+        } catch (error) {
+            console.error('Error getting wallet balance:', error);
+            return 0;
+        }
+    }
+
+    /**
+     * Send SOL payment for project investment
+     */
+    async sendPayment(
+        senderWallet: any, // Wallet adapter wallet
+        payment: ProjectPayment
+    ): Promise<PaymentResult> {
+        try {
+            if (!senderWallet.publicKey) {
+                return { success: false, error: 'Wallet not connected' };
+            }
+
+            // Convert USD to SOL
+            const solAmount = await this.convertUsdToSol(payment.amount);
+            
+            // Check if user has sufficient balance
+            const balance = await this.getWalletBalance(senderWallet.publicKey);
+            if (balance < solAmount + 0.001) { // Add small buffer for transaction fees
+                return { 
+                    success: false, 
+                    error: `Insufficient balance. Need ${(solAmount + 0.001).toFixed(4)} SOL, have ${balance.toFixed(4)} SOL` 
+                };
+            }
+
+            // Create transaction
+            const transaction = new Transaction().add(
+                SystemProgram.transfer({
+                    fromPubkey: senderWallet.publicKey,
+                    toPubkey: this.PROJECT_WALLET,
+                    lamports: Math.floor(solAmount * LAMPORTS_PER_SOL),
+                })
+            );
+
+            // Get latest blockhash
+            const { blockhash } = await this.connection.getLatestBlockhash();
+            transaction.recentBlockhash = blockhash;
+            transaction.feePayer = senderWallet.publicKey;
+
+            // Sign and send transaction
+            const signed = await senderWallet.signTransaction(transaction);
+            const signature = await this.connection.sendRawTransaction(signed.serialize());
+
+            // Wait for confirmation
+            await this.connection.confirmTransaction(signature, 'processed');
+
+            console.log('Payment successful:', signature);
+            
+            return {
+                success: true,
+                signature,
+                amount: solAmount,
+            };
+
+        } catch (error: any) {
+            console.error('Payment error:', error);
+            return {
+                success: false,
+                error: error.message || 'Transaction failed',
+            };
+        }
+    }
+
+    /**
+     * Verify a transaction
+     */
+    async verifyTransaction(signature: string): Promise<{
+        confirmed: boolean;
+        amount?: number;
+        from?: string;
+        to?: string;
+    }> {
+        try {
+            const transaction = await this.connection.getTransaction(signature, {
+                commitment: 'confirmed'
+            });
+
+            if (transaction && transaction.meta && !transaction.meta.err) {
+                const preBalance = transaction.meta.preBalances[0];
+                const postBalance = transaction.meta.postBalances[0];
+                const amount = (preBalance - postBalance) / LAMPORTS_PER_SOL;
+
+                return {
+                    confirmed: true,
+                    amount,
+                    from: transaction.transaction.message.accountKeys[0].toBase58(),
+                    to: transaction.transaction.message.accountKeys[1].toBase58(),
+                };
+            }
+
+            return { confirmed: false };
+        } catch (error) {
+            console.error('Error verifying transaction:', error);
+            return { confirmed: false };
+        }
+    }
+
+    /**
+     * Request airdrop for testing (devnet only)
+     */
+    async requestAirdrop(publicKey: PublicKey, amount: number = 1): Promise<string> {
+        try {
+            const signature = await this.connection.requestAirdrop(
+                publicKey,
+                amount * LAMPORTS_PER_SOL
+            );
+            await this.connection.confirmTransaction(signature);
+            return signature;
+        } catch (error) {
+            console.error('Airdrop failed:', error);
+            throw error;
+        }
+    }
+}
+
+export const blockchainService = new BlockchainPaymentService();
+export default blockchainService;

@@ -1,0 +1,52 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        Int      @id @default(autoincrement())
+  email     String   @unique
+  password  String
+  solanaWalletAddress String? @map("solana_wallet_address")
+  createdAt DateTime @default(now()) @map("created_at")
+  investments Investment[]
+}
+
+model Project {
+  id        Int      @id @default(autoincrement())
+  name      String
+  description String?
+  targetAmount Decimal  @map("target_amount")
+  raisedAmount Decimal  @default(0) @map("raised_amount")
+  solanaProgramAddress String? @map("solana_program_address")
+  projectAccountPubkey String? @map("project_account_pubkey")
+  status    String   @default("active")
+  createdAt DateTime @default(now()) @map("created_at")
+  investments Investment[]
+}
+
+model Investment {
+  id        Int      @id @default(autoincrement())
+  user      User    @relation(fields: [userId], references: [id])
+  userId    Int
+  project   Project @relation(fields: [projectId], references: [id])
+  projectId Int
+  amount    Decimal
+  solanaTxSignature String? @map("solana_tx_signature")
+  slotNumber BigInt? @map("slot_number")
+  createdAt DateTime @default(now()) @map("created_at")
+}
+
+model SolanaTransaction {
+  id        Int      @id @default(autoincrement())
+  signature String  @unique
+  slotNumber BigInt? @map("slot_number")
+  blockTime DateTime? @map("block_time")
+  status    String   @default("pending")
+  feeLamports BigInt? @map("fee_lamports")
+  createdAt DateTime @default(now()) @map("created_at")
+} 
